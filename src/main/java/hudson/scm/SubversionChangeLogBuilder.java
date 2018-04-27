@@ -55,6 +55,7 @@ import java.io.IOException;
 import java.io.PrintStream;
 import java.io.File;
 import java.io.Serializable;
+import java.util.List;
 import java.util.Map;
 import java.util.Collection;
 import javax.annotation.Nonnull;
@@ -101,7 +102,7 @@ public final class SubversionChangeLogBuilder {
         this.env = env;
     }
 
-    public boolean run(Collection<SubversionSCM.External> externals, Result changeLog) throws IOException, InterruptedException {
+    public boolean run(Map<String, List<SubversionSCM.External>> externalsMap, Result changeLog) throws IOException, InterruptedException {
         boolean changelogFileCreated = false;
 
         TransformerHandler th = createTransformerHandler();
@@ -112,33 +113,30 @@ public final class SubversionChangeLogBuilder {
         th.setDocumentLocator(DUMMY_LOCATOR);
         logHandler.startDocument();
 
-        for (ModuleLocation l : scm.getLocations(env, build)) {
+        ModuleLocation[] locations = scm.getLocations(env, build);
+        for (ModuleLocation l : locations) {
             ISVNAuthenticationProvider authProvider =
                     CredentialsSVNAuthenticationProviderImpl
                             .createAuthenticationProvider(build.getParent(), scm, l, listener);
             final SVNClientManager manager = SubversionSCM.createClientManager(authProvider).getCore();
-            try {
-                SVNLogClient svnlc = manager.getLogClient();
-                PathContext context = getUrlForPath(workspace.child(l.getLocalDir()), authProvider);
-                context.moduleWorkspacePath = l.getLocalDir();
-                changelogFileCreated |= buildModule(context, svnlc, logHandler);
-            } finally {
-                manager.dispose();
-            }
-        }
-        ISVNAuthenticationProvider authProvider =
-                CredentialsSVNAuthenticationProviderImpl
-                        .createAuthenticationProvider(build.getParent(), scm, null, listener);
-        final SVNClientManager manager = SubversionSCM.createClientManager(authProvider).getCore();
-        try {
-            SVNLogClient svnlc = manager.getLogClient();
-            for(SubversionSCM.External ext : externals) {
-                PathContext context = getUrlForPath(workspace.child(ext.path), authProvider);
-                context.moduleWorkspacePath = ext.path;
-                changelogFileCreated |= buildModule(context, svnlc, logHandler);
-            }
-        } finally {
-            manager.dispose();
+			try {
+				SVNLogClient svnlc = manager.getLogClient();
+				PathContext context = getUrlForPath(workspace.child(l.getLocalDir()), authProvider);
+				context.moduleWorkspacePath = l.getLocalDir();
+				changelogFileCreated |= buildModule(context, svnlc, logHandler);
+
+				// externals for this module location
+				List<SubversionSCM.External> externals = externalsMap.get(l.remote);
+				if (externals != null) {
+					for (SubversionSCM.External ext : externals) {
+						PathContext extContext = getUrlForPath(workspace.child(ext.path), authProvider);
+						extContext.moduleWorkspacePath = ext.path;
+						changelogFileCreated |= buildModule(extContext, svnlc, logHandler);
+					}
+				}
+			} finally {
+				manager.dispose();
+			}
         }
 
         if(changelogFileCreated) {
